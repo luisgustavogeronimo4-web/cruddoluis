@@ -1,4 +1,5 @@
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +14,12 @@ import {
 export const Home = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user) {
+      navigate("/tasks", { replace: true });
+    }
+  }, [user, navigate]);
 
   const handleLogout = () => {
     logout();
@@ -31,23 +38,15 @@ export const Home = () => {
 
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Esta é a área inicial protegida do sistema.
-          </p>
-
-          <p className="text-sm text-muted-foreground">
-            O CRUD de tarefas será implementado na próxima fase.
+            Redirecionando para o gerenciador de tarefas...
           </p>
         </CardContent>
 
-        <CardFooter className="flex flex-col gap-3 sm:flex-row">
-          <Link to="/tasks" className="w-full sm:w-auto">
-            <Button className="w-full">Ir para tarefas</Button>
-          </Link>
-
+        <CardFooter>
           <Button
             type="button"
             variant="outline"
-            className="w-full sm:w-auto"
+            className="w-full"
             onClick={handleLogout}
           >
             Sair

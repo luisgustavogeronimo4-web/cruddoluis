@@ -1,7 +1,8 @@
 export type Task = {
-  id: number;
+  id: string;
   title: string;
-  description: string;
-  completed: boolean;
+  description?: string;
   createdAt: string;
+  updatedAt?: string;
+  deleted: boolean;
 };
