@@ -17,15 +17,14 @@ import type { Task } from "@/types/Task";
 import { toast } from "sonner";
 
 export const Tasks = () => {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isCreating, setIsCreating] = useState(false);
 
   const loadTasks = () => {
-    const userId = useAuth().user?.id;
-    if (userId) {
-      setTasks(taskService.getActive(userId));
+    if (user?.id) {
+      setTasks(taskService.getActive(user.id));
     } else {
       setTasks([]);
     }
@@ -33,14 +32,16 @@ export const Tasks = () => {
 
   useEffect(() => {
     loadTasks();
-  }, []);
+  }, [user?.id]);
 
   const handleCreate = (task: Omit<Task, "id" | "createdAt">) => {
     setIsCreating(true);
     try {
-      taskService.create(task, useAuth().user?.id || "");
-      toast.success("Task created successfully");
-      loadTasks();
+      if (user?.id) {
+        taskService.create(task, user.id);
+        toast.success("Task created successfully");
+        loadTasks();
+      }
     } catch {
       toast.error("Failed to create task");
     } finally {
