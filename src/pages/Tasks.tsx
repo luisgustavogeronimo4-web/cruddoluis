@@ -26,9 +26,6 @@ export const Tasks = () => {
   const [trashTasks, setTrashTasks] = useState<Task[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdating, setIsUpdating] = useState<string | null>(null);
-  const [isDeleting, setIsDeleting] = useState<string | null>(null);
-  const [isRestoring, setIsRestoring] = useState<string | null>(null);
-  const [isPermanentlyDeleting, setIsPermanentlyDeleting] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
   const [confirmTitle, setConfirmTitle] = useState("");
@@ -39,15 +36,10 @@ export const Tasks = () => {
   const [editTask, setEditTask] = useState<Task | null>(null);
 
   const loadTasks = async () => {
-    if (!user?.id) {
-      setActiveTasks([]);
-      setTrashTasks([]);
-      return;
-    }
     try {
       const [active, deleted] = await Promise.all([
-        taskService.getActive(user.id),
-        taskService.getDeleted(user.id),
+        taskService.getActive(),
+        taskService.getDeleted(),
       ]);
       setActiveTasks(active);
       setTrashTasks(deleted);
@@ -57,6 +49,7 @@ export const Tasks = () => {
     }
   };
 
+  // reload when auth state changes (login/logout)
   useEffect(() => {
     loadTasks();
   }, [user?.id]);
@@ -64,7 +57,7 @@ export const Tasks = () => {
   const handleCreate = async (task: Omit<Task, "id" | "created_at" | "updated_at">) => {
     setIsCreating(true);
     try {
-      await taskService.create(task, user?.id || "");
+      await taskService.create(task);
       toast.success("Task created successfully");
       await loadTasks();
     } catch {
@@ -98,6 +91,12 @@ export const Tasks = () => {
 
   const submitEdit = async (data: Omit<Task, "id" | "created_at" | "updated_at">) => {
     if (!editTask) return;
+    // confirmation before saving edits
+    const confirmed = window.confirm(
+      "Tem certeza que deseja salvar as alterações nesta tarefa?",
+    );
+    if (!confirmed) return;
+
     setIsUpdating(editTask.id);
     try {
       await taskService.update(editTask.id, {
@@ -120,15 +119,16 @@ export const Tasks = () => {
       "Mover para lixeira",
       "Tem certeza que deseja mover esta tarefa para a lixeira?",
       async () => {
-        setIsDeleting(id);
         try {
-          await taskService.delete(id);
-          toast.success("Task moved to trash");
-          await loadTasks();
+          const ok = await taskService.softDelete(id);
+          if (ok) {
+            toast.success("Task moved to trash");
+            await loadTasks();
+          } else {
+            toast.error("Failed to move task to trash");
+          }
         } catch {
-          toast.error("Failed to move to trash");
-        } finally {
-          setIsDeleting(null);
+          toast.error("Failed to move task to trash");
         }
       },
     );
@@ -139,15 +139,16 @@ export const Tasks = () => {
       "Restaurar tarefa",
       "Deseja realmente restaurar esta tarefa?",
       async () => {
-        setIsRestoring(id);
         try {
-          await taskService.restore(id);
-          toast.success("Task restored successfully");
-          await loadTasks();
+          const ok = await taskService.restore(id);
+          if (ok) {
+            toast.success("Task restored successfully");
+            await loadTasks();
+          } else {
+            toast.error("Failed to restore task");
+          }
         } catch {
           toast.error("Failed to restore task");
-        } finally {
-          setIsRestoring(null);
         }
       },
     );
@@ -158,15 +159,16 @@ export const Tasks = () => {
       "Excluir permanentemente",
       "Tem certeza que deseja excluir permanentemente esta tarefa?",
       async () => {
-        setIsPermanentlyDeleting(id);
         try {
-          await taskService.deletePermanently(id);
-          toast.success("Task permanently deleted");
-          await loadTasks();
+          const ok = await taskService.deletePermanently(id);
+          if (ok) {
+            toast.success("Task permanently deleted");
+            await loadTasks();
+          } else {
+            toast.error("Failed to permanently delete task");
+          }
         } catch {
           toast.error("Failed to permanently delete task");
-        } finally {
-          setIsPermanentlyDeleting(null);
         }
       },
     );
@@ -261,7 +263,9 @@ export const Tasks = () => {
         open={editOpen}
         onOpenChange={setEditOpen}
         onSubmit={submitEdit}
-        initialData={editTask ? { title: editTask.title, description: editTask.description } : undefined}
+        initialData={
+          editTask ? { title: editTask.title, description: editTask.description } : undefined
+        }
         isSubmitting={isUpdating !== null}
       />
     </main>
