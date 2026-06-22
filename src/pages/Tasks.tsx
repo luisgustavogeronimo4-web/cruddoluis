@@ -39,19 +39,24 @@ export const Tasks = () => {
       setTrashTasks([]);
       return;
     }
-    const [active, deleted] = await Promise.all([
-      taskService.getActive(user.id),
-      taskService.getDeleted(user.id),
-    ]);
-    setActiveTasks(active);
-    setTrashTasks(deleted);
+    try {
+      const [active, deleted] = await Promise.all([
+        taskService.getActive(user.id),
+        taskService.getDeleted(user.id),
+      ]);
+      setActiveTasks(active);
+      setTrashTasks(deleted);
+    } catch (error: any) {
+      console.error("loadTasks error:", error.message);
+      toast.error("Failed to load tasks");
+    }
   };
 
   useEffect(() => {
     loadTasks();
   }, [user?.id]);
 
-  const handleCreate = async (task: Omit<Task, "id" | "createdAt" | "updatedAt">) => {
+  const handleCreate = async (task: Omit<Task, "id" | "created_at" | "updated_at">) => {
     setIsCreating(true);
     try {
       await taskService.create(task, user?.id || "");
@@ -61,6 +66,16 @@ export const Tasks = () => {
       toast.error("Failed to create task");
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleToggleComplete = async (task: Task) => {
+    try {
+      await taskService.update(task.id, { is_completed: !task.is_completed });
+      toast.success("Task status updated");
+      await loadTasks();
+    } catch {
+      toast.error("Failed to update task status");
     }
   };
 
@@ -186,6 +201,7 @@ export const Tasks = () => {
                       task={task}
                       onEdit={handleUpdate}
                       onDelete={() => handleDelete(task.id)}
+                      onToggleComplete={handleToggleComplete}
                     />
                   ))
                 )}
@@ -203,7 +219,7 @@ export const Tasks = () => {
                       task={task}
                       onRestore={() => handleRestore(task.id)}
                       onDeletePermanently={() => handlePermanentDelete(task.id)}
-                      isDeleted
+                      onToggleComplete={handleToggleComplete}
                     />
                   ))
                 )}
