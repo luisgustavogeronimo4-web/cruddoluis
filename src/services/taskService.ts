@@ -4,162 +4,146 @@ import type { Task } from "@/types/Task";
 const TABLE_NAME = "tasks";
 
 /**
- * Helper – fetch the current authenticated user.
- * Throws if no session is present, which triggers UI error handling.
+ * Helper to obtain the current logged‑in user id from Supabase.
+ * Throws if no user is authenticated so that RLS policies receive a valid session.
  */
-async function getCurrentUser() {
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
+async function getCurrentUserId(): Promise<string> {
+  const { data, error } = await supabase.auth.getUser();
   if (error) {
     console.error("Supabase auth error:", error.message);
-    throw new Error("Erro ao obter sessão do usuário.");
-  }
-  if (!user) {
     throw new Error("Usuário não autenticado. Faça login novamente.");
   }
-  return user;
+  if (!data?.user?.id) {
+    throw new Error("Usuário não autenticado. Faça login novamente.");
+  }
+  return data.user.id;
 }
 
-/**
- * Build a base query that always filters by the logged‑in user.
- */
-function userQuery(userId: string) {
-  return supabase.from<Task>(TABLE_NAME).select("*").eq("user_id", userId);
-}
-
-/* -------------------------------------------------------------------------- */
-/* READ --------------------------------------------------------------------- */
 export const taskService = {
-  /** Fetch active (non‑deleted) tasks for the current user */
+  /** Fetch tasks that are not soft‑deleted */
   async getActive(): Promise<Task[]> {
-    const user = await getCurrentUser();
+    const userId = await getCurrentUserId();
 
-    const { data, error } = await userQuery(user.id)
-      .is("deleted_at", null) // not soft‑deleted
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select("*")
+      .eq("user_id", userId)
+      .is("deleted_at", null) // only not‑deleted
       .order("created_at", { ascending: false });
 
     if (error) {
       console.error("getActive error:", error.message);
-      throw new Error("Falha ao carregar tarefas ativas.");
+      return [];
     }
-    return data || [];
+    // filter out completed tasks as UI expects only active (not completed) ones
+    return (data || []).filter((t) => !t.is_completed);
   },
 
-  /** Fetch soft‑deleted tasks (trash) for the current user */
+  /** Fetch tasks that are in the trash (soft‑deleted) */
   async getDeleted(): Promise<Task[]> {
-    const user = await getCurrentUser();
+    const userId = await getCurrentUserId();
 
     const { data, error } = await supabase
-      .from<Task>(TABLE_NAME)
+      .from(TABLE_NAME)
       .select("*")
-      .eq("user_id", user.id)
-      .not("deleted_at", "is", null) // only rows with a deleted_at timestamp
+      .eq("user_id", userId)
+      .not("deleted_at", "is", null) // deleted_at NOT NULL
       .order("deleted_at", { ascending: false });
 
     if (error) {
       console.error("getDeleted error:", error.message);
-      throw new Error("Falha ao carregar tarefas da lixeira.");
+      return [];
     }
     return data || [];
   },
 
-  /* ---------------------------------------------------------------------- */
-  /* CREATE ----------------------------------------------------------------- */
-  /** Insert a new task – the service automatically adds `user_id` */
+  /** Create a new task, attaching the logged‑in user id */
   async create(
     task: Omit<Task, "id" | "created_at" | "updated_at" | "user_id" | "deleted_at">,
   ): Promise<Task> {
-    const user = await getCurrentUser();
+    const userId = await getCurrentUserId();
 
     const { data, error } = await supabase
-      .from<Task>(TABLE_NAME)
-      .insert({ ...task, user_id: user.id })
+      .from(TABLE_NAME)
+      .insert({ ...task, user_id: userId })
       .single();
 
     if (error) {
       console.error("create error:", error.message);
-      throw new Error("Falha ao criar tarefa.");
+      throw error;
     }
-    return data!;
+    return data as Task;
   },
 
-  /* ---------------------------------------------------------------------- */
-  /* UPDATE ----------------------------------------------------------------- */
-  /** Update any mutable fields of a task (title, description, completed, etc.) */
+  /** Update a task by its id – also enforce user ownership */
   async update(
-    id: string,
-    updates: Partial<Omit<Task, "id" | "user_id" | "created_at">>,
+    taskId: string,
+    updates: Partial<Omit<Task, "id" | "created_at" | "updated_at" | "user_id">>,
   ): Promise<Task> {
-    const user = await getCurrentUser();
+    const userId = await getCurrentUserId();
 
     const { data, error } = await supabase
-      .from<Task>(TABLE_NAME)
+      .from(TABLE_NAME)
       .update(updates)
-      .eq("id", id)
-      .eq("user_id", user.id) // RLS guard
+      .eq("id", taskId)
+      .eq("user_id", userId) // RLS safety
       .single();
 
     if (error) {
       console.error("update error:", error.message);
-      throw new Error("Falha ao atualizar tarefa.");
+      throw error;
     }
-    return data!;
+    return data as Task;
   },
 
-  /* ---------------------------------------------------------------------- */
-  /* SOFT DELETE ------------------------------------------------------------ */
-  /** Move a task to the trash (set deleted_at) */
-  async softDelete(id: string): Promise<void> {
-    const user = await getCurrentUser();
+  /** Soft‑delete: set `deleted_at` to current timestamp – enforce ownership */
+  async softDelete(taskId: string): Promise<boolean> {
+    const userId = await getCurrentUserId();
 
     const { error } = await supabase
-      .from<Task>(TABLE_NAME)
+      .from(TABLE_NAME)
       .update({ deleted_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("user_id", user.id);
+      .eq("id", taskId)
+      .eq("user_id", userId);
 
     if (error) {
       console.error("softDelete error:", error.message);
-      throw new Error("Falha ao mover tarefa para a lixeira.");
+      return false;
     }
+    return true;
   },
 
-  /* ---------------------------------------------------------------------- */
-  /* RESTORE ---------------------------------------------------------------- */
-  /** Restore a soft‑deleted task (clear deleted_at) */
-  async restore(id: string): Promise<void> {
-    const user = await getCurrentUser();
+  /** Restore a soft‑deleted task – enforce ownership */
+  async restore(taskId: string): Promise<boolean> {
+    const userId = await getCurrentUserId();
 
     const { error } = await supabase
-      .from<Task>(TABLE_NAME)
+      .from(TABLE_NAME)
       .update({ deleted_at: null })
-      .eq("id", id)
-      .eq("user_id", user.id);
+      .eq("id", taskId)
+      .eq("user_id", userId);
 
     if (error) {
       console.error("restore error:", error.message);
-      throw new Error("Falha ao restaurar tarefa.");
+      return false;
     }
+    return true;
   },
 
-  /* ---------------------------------------------------------------------- */
-  /* PERMANENT DELETE ------------------------------------------------------- */
-  /** Hard‑delete a task from the database */
-  async deletePermanently(id: string): Promise<void> {
-    const user = await getCurrentUser();
+  /** Permanently delete a row – enforce ownership */
+  async deletePermanently(taskId: string): Promise<boolean> {
+    const userId = await getCurrentUserId();
 
     const { error } = await supabase
-      .from<Task>(TABLE_NAME)
+      .from(TABLE_NAME)
       .delete()
-      .eq("id", id)
-      .eq("user_id", user.id);
+      .eq("id", taskId)
+      .eq("user_id", userId);
 
     if (error) {
       console.error("deletePermanently error:", error.message);
-      throw new Error("Falha ao excluir tarefa permanentemente.");
+      return false;
     }
+    return true;
   },
 };

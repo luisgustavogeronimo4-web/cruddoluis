@@ -35,85 +35,86 @@ export const Tasks = () => {
   const [editOpen, setEditOpen] = useState(false);
   const [editTask, setEditTask] = useState<Task | null>(null);
 
-  /** Load active (non‑deleted) and trash tasks */
   const loadTasks = async () => {
     try {
       const [active, deleted] = await Promise.all([
         taskService.getActive(),
         taskService.getDeleted(),
       ]);
-      setActiveTasks(active.filter((t) => !t.is_completed));
+      setActiveTasks(active);
       setTrashTasks(deleted);
-    } catch (err: any) {
-      toast.error(err.message ?? "Erro ao carregar tarefas");
+    } catch (error: any) {
+      console.error("loadTasks error:", error.message);
+      toast.error("Failed to load tasks");
     }
   };
 
-  // reload when auth changes
+  // reload when auth state changes (login/logout)
   useEffect(() => {
-    loadTasks();
+    if (user?.id) loadTasks();
   }, [user?.id]);
 
-  /** CREATE ----------------------------------------------------------- */
-  const handleCreate = async (
-    task: Omit<Task, "id" | "created_at" | "updated_at">,
-  ) => {
+  const handleCreate = async (task: Omit<Task, "id" | "created_at" | "updated_at">) => {
     setIsCreating(true);
     try {
       const created = await taskService.create(task);
-      // prepend only if not completed (new tasks start incomplete)
-      if (!created.is_completed) setActiveTasks((prev) => [created, ...prev]);
-      toast.success("Tarefa criada com sucesso");
+      // prepend newly created task (only if not completed)
+      if (!created.is_completed) {
+        setActiveTasks((prev) => [created, ...prev]);
+      }
+      toast.success("Task created successfully");
     } catch (err: any) {
-      toast.error(err.message ?? "Falha ao criar tarefa");
+      toast.error(err.message ?? "Failed to create task");
     } finally {
       setIsCreating(false);
     }
   };
 
-  /** TOGGLE COMPLETE --------------------------------------------------- */
   const handleToggleComplete = async (task: Task) => {
     try {
       await taskService.update(task.id, { is_completed: !task.is_completed });
-      toast.success("Status da tarefa atualizado");
-      await loadTasks();
-    } catch (err: any) {
-      toast.error(err.message ?? "Erro ao atualizar status");
+      // optimistic UI: toggle locally
+      setActiveTasks((prev) =>
+        prev.map((t) => (t.id === task.id ? { ...t, is_completed: !t.is_completed } : t)),
+      );
+      toast.success("Task status updated");
+    } catch {
+      toast.error("Failed to update task status");
     }
   };
 
-  /** CONFIRM MODAL ---------------------------------------------------- */
-  const openConfirm = (
-    title: string,
-    description: string,
-    action: () => void,
-  ) => {
+  const openConfirm = (title: string, description: string, action: () => void) => {
     setConfirmTitle(title);
     setConfirmDescription(description);
     setConfirmAction(() => action);
     setConfirmOpen(true);
   };
 
-  /** EDIT ------------------------------------------------------------- */
   const handleUpdate = (task: Task) => {
     setEditTask(task);
     setEditOpen(true);
   };
 
-  const submitEdit = async (
-    data: Omit<Task, "id" | "created_at" | "updated_at">,
-  ) => {
+  const submitEdit = async (data: Omit<Task, "id" | "created_at" | "updated_at">) => {
     if (!editTask) return;
+    const confirmed = window.confirm(
+      "Tem certeza que deseja salvar as alterações nesta tarefa?",
+    );
+    if (!confirmed) return;
+
     setIsUpdating(editTask.id);
     try {
-      await taskService.update(editTask.id, {
+      const updated = await taskService.update(editTask.id, {
         ...data,
         updated_at: new Date().toISOString(),
       });
-      toast.success("Tarefa atualizada");
-      await loadTasks();
+      // replace in active list
+      setActiveTasks((prev) =>
+        prev.map((t) => (t.id === updated.id ? updated : t)),
+      );
+      toast.success("Task updated successfully");
     } catch (err: any) {
-      toast.error(err.message ?? "Erro ao atualizar tarefa");
+      toast.error(err.message ?? "Failed to update task");
     } finally {
       setIsUpdating(null);
       setEditOpen(false);
@@ -121,58 +122,73 @@ export const Tasks = () => {
     }
   };
 
-  /** DELETE (soft) ---------------------------------------------------- */
   const handleDelete = (id: string) => {
     openConfirm(
       "Mover para lixeira",
       "Tem certeza que deseja mover esta tarefa para a lixeira?",
       async () => {
         try {
-          await taskService.softDelete(id);
-          toast.success("Tarefa movida para a lixeira");
-          await loadTasks();
-        } catch (err: any) {
-          toast.error(err.message ?? "Erro ao mover para lixeira");
+          const ok = await taskService.softDelete(id);
+          if (ok) {
+            setActiveTasks((prev) => prev.filter((t) => t.id !== id));
+            // reload trash list
+            const trash = await taskService.getDeleted();
+            setTrashTasks(trash);
+            toast.success("Task moved to trash");
+          } else {
+            toast.error("Failed to move task to trash");
+          }
+        } catch {
+          toast.error("Failed to move task to trash");
         }
       },
     );
   };
 
-  /** RESTORE ---------------------------------------------------------- */
   const handleRestore = (id: string) => {
     openConfirm(
       "Restaurar tarefa",
       "Deseja realmente restaurar esta tarefa?",
       async () => {
         try {
-          await taskService.restore(id);
-          toast.success("Tarefa restaurada");
-          await loadTasks();
-        } catch (err: any) {
-          toast.error(err.message ?? "Erro ao restaurar tarefa");
+          const ok = await taskService.restore(id);
+          if (ok) {
+            // move back to active list
+            const restored = await taskService.getActive();
+            setActiveTasks(restored);
+            const trash = await taskService.getDeleted();
+            setTrashTasks(trash);
+            toast.success("Task restored successfully");
+          } else {
+            toast.error("Failed to restore task");
+          }
+        } catch {
+          toast.error("Failed to restore task");
         }
       },
     );
   };
 
-  /** PERMANENT DELETE ------------------------------------------------- */
   const handlePermanentDelete = (id: string) => {
     openConfirm(
       "Excluir permanentemente",
       "Tem certeza que deseja excluir permanentemente esta tarefa?",
       async () => {
         try {
-          await taskService.deletePermanently(id);
-          toast.success("Tarefa excluída permanentemente");
-          await loadTasks();
-        } catch (err: any) {
-          toast.error(err.message ?? "Erro ao excluir tarefa");
+          const ok = await taskService.deletePermanently(id);
+          if (ok) {
+            setTrashTasks((prev) => prev.filter((t) => t.id !== id));
+            toast.success("Task permanently deleted");
+          } else {
+            toast.error("Failed to permanently delete task");
+          }
+        } catch {
+          toast.error("Failed to permanently delete task");
         }
       },
     );
   };
 
-  /** LOGOUT ----------------------------------------------------------- */
   const handleLogout = () => {
     logout();
     navigate("/login", { replace: true });
@@ -218,9 +234,7 @@ export const Tasks = () => {
               <section className="md:w-1/2">
                 <h2 className="text-lg font-medium mb-4">Trash</h2>
                 {trashTasks.length === 0 ? (
-                  <p className="text-center text-gray-500 py-8">
-                    Trash is empty.
-                  </p>
+                  <p className="text-center text-gray-500 py-8">Trash is empty.</p>
                 ) : (
                   trashTasks.map((task) => (
                     <TaskItem
@@ -265,9 +279,7 @@ export const Tasks = () => {
         onOpenChange={setEditOpen}
         onSubmit={submitEdit}
         initialData={
-          editTask
-            ? { title: editTask.title, description: editTask.description }
-            : undefined
+          editTask ? { title: editTask.title, description: editTask.description } : undefined
         }
         isSubmitting={isUpdating !== null}
       />
