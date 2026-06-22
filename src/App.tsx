@@ -20,7 +20,8 @@ const App = () => (
       <AuthProvider>
         <BrowserRouter>
           <Routes>
-            <Route path="/auth" element={<Auth />} />
+            {/* rota de login/auth agora é '/login' */}
+            <Route path="/login" element={<Auth />} />
             <Route
               path="/"
               element={
