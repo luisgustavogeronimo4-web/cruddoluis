@@ -28,15 +28,16 @@ export const taskService = {
       .from(TABLE_NAME)
       .select("*")
       .eq("user_id", userId)
-      .is("deleted_at", null) // only not‑deleted
+      .is("deleted_at", null) // apenas não‑deletadas
       .order("created_at", { ascending: false });
 
     if (error) {
       console.error("getActive error:", error.message);
       return [];
     }
-    // filter out completed tasks as UI expects only active (not completed) ones
-    return (data || []).filter((t) => !t.is_completed);
+    
+    // CORRIGIDO: alterado de is_completed para completed de acordo com o banco de dados
+    return (data || []).filter((t) => t && !t.completed);
   },
 
   /** Fetch tasks that are in the trash (soft‑deleted) */
@@ -47,7 +48,7 @@ export const taskService = {
       .from(TABLE_NAME)
       .select("*")
       .eq("user_id", userId)
-      .not("deleted_at", "is", null) // deleted_at NOT NULL
+      .not("deleted_at", "is", null) // deleted_at NÃO é nulo
       .order("deleted_at", { ascending: false });
 
     if (error) {
@@ -63,9 +64,11 @@ export const taskService = {
   ): Promise<Task> {
     const userId = await getCurrentUserId();
 
+    // CORRIGIDO: Adicionado .select().single() para que o Supabase retorne os dados salvos ao React
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .insert({ ...task, user_id: userId })
+      .select()
       .single();
 
     if (error) {
@@ -82,11 +85,13 @@ export const taskService = {
   ): Promise<Task> {
     const userId = await getCurrentUserId();
 
+    // CORRIGIDO: Adicionado .select().single() para atualizar o estado local instantaneamente sem refresh
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .update(updates)
       .eq("id", taskId)
-      .eq("user_id", userId) // RLS safety
+      .eq("user_id", userId) // Segurança do RLS
+      .select()
       .single();
 
     if (error) {
