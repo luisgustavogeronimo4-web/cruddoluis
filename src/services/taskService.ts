@@ -3,10 +3,6 @@ import type { Task } from "@/types/Task";
 
 const TABLE_NAME = "tasks";
 
-/**
- * Helper to obtain the current logged‑in user id from Supabase.
- * Throws if no user is authenticated so that RLS policies receive a valid session.
- */
 async function getCurrentUserId(): Promise<string> {
   const { data, error } = await supabase.auth.getUser();
   if (error) {
@@ -20,7 +16,6 @@ async function getCurrentUserId(): Promise<string> {
 }
 
 export const taskService = {
-  /** Fetch tasks that are not soft‑deleted */
   async getActive(): Promise<Task[]> {
     const userId = await getCurrentUserId();
 
@@ -28,7 +23,7 @@ export const taskService = {
       .from(TABLE_NAME)
       .select("*")
       .eq("user_id", userId)
-      .is("deleted_at", null) // apenas não‑deletadas
+      .is("deleted_at", null)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -36,11 +31,9 @@ export const taskService = {
       return [];
     }
     
-    // CORRIGIDO: alterado de is_completed para completed de acordo com o banco de dados
     return (data || []).filter((t) => t && !t.completed);
   },
 
-  /** Fetch tasks that are in the trash (soft‑deleted) */
   async getDeleted(): Promise<Task[]> {
     const userId = await getCurrentUserId();
 
@@ -48,7 +41,7 @@ export const taskService = {
       .from(TABLE_NAME)
       .select("*")
       .eq("user_id", userId)
-      .not("deleted_at", "is", null) // deleted_at NÃO é nulo
+      .not("deleted_at", "is", null)
       .order("deleted_at", { ascending: false });
 
     if (error) {
@@ -58,13 +51,11 @@ export const taskService = {
     return data || [];
   },
 
-  /** Create a new task, attaching the logged‑in user id */
   async create(
     task: Omit<Task, "id" | "created_at" | "updated_at" | "user_id" | "deleted_at">,
   ): Promise<Task> {
     const userId = await getCurrentUserId();
 
-    // CORRIGIDO: Adicionado .select().single() para que o Supabase retorne os dados salvos ao React
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .insert({ ...task, user_id: userId })
@@ -78,19 +69,17 @@ export const taskService = {
     return data as Task;
   },
 
-  /** Update a task by its id – also enforce user ownership */
   async update(
     taskId: string,
     updates: Partial<Omit<Task, "id" | "created_at" | "updated_at" | "user_id">>,
   ): Promise<Task> {
     const userId = await getCurrentUserId();
 
-    // CORRIGIDO: Adicionado .select().single() para atualizar o estado local instantaneamente sem refresh
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .update(updates)
       .eq("id", taskId)
-      .eq("user_id", userId) // Segurança do RLS
+      .eq("user_id", userId)
       .select()
       .single();
 
@@ -101,7 +90,6 @@ export const taskService = {
     return data as Task;
   },
 
-  /** Soft‑delete: set `deleted_at` to current timestamp – enforce ownership */
   async softDelete(taskId: string): Promise<boolean> {
     const userId = await getCurrentUserId();
 
@@ -118,7 +106,6 @@ export const taskService = {
     return true;
   },
 
-  /** Restore a soft‑deleted task – enforce ownership */
   async restore(taskId: string): Promise<boolean> {
     const userId = await getCurrentUserId();
 
@@ -135,7 +122,6 @@ export const taskService = {
     return true;
   },
 
-  /** Permanently delete a row – enforce ownership */
   async deletePermanently(taskId: string): Promise<boolean> {
     const userId = await getCurrentUserId();
 
